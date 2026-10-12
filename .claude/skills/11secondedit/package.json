@@ -1,0 +1,17 @@
+{
+  "name": "11secondedit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One-click AI video editor that runs inside Claude Code. Raw talking-head footage in, edited Reel out.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@hyperframes/player": "0.8.81",
+    "gsap": "3.14.2",
+    "hyperframes": "0.8.81"
+  }
+}

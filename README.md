@@ -310,6 +310,42 @@ your name. If a draft needs a number you have not given, it comes back with
 until the fact got checked. If something here contradicts what Instagram is
 doing when you read it, Instagram is right.
 
+## 11 Second Edit: the editor
+
+`/11secondedit` turns raw talking-head footage into an edited 9:16 Reel.
+Claude Code is the editor. Type the command, a local app opens in your
+browser, you drop in the footage (and your own b-roll if you have it), flip
+the features you want, and click Edit Video. Claude reads the word-timestamped
+transcript, decides what to cut and where things go, and the page ticks off
+each step as it runs. At the end you get a preview, a timeline and a
+transcript where deleting a word cuts it from the video, plus an Export
+button.
+
+Features, each a toggle: enhance audio, remove bad takes and false starts,
+remove filler words, remove silences, b-roll, zoom cuts, colour correction,
+a text hook, a CTA end card, word-by-word captions, background music, sound
+effects, and 9:16 or 16:9 output.
+
+It lives in [`.claude/skills/11secondedit`](.claude/skills/11secondedit/SKILL.md),
+so it works as soon as you open this repo in Claude Code. To use it in
+another project, copy that folder into the project's `.claude/skills/`.
+
+You need Node 22+, FFmpeg and [WhisperX](https://github.com/m-bain/whisperX)
+(`pip install whisperx`). The first run installs the two Node dependencies
+(HyperFrames and GSAP). Keys go in `.env`, see
+[`.env.example`](.claude/skills/11secondedit/.env.example):
+
+| key | what for | without it |
+| --- | --- | --- |
+| `AUPHONIC_API_KEY` | audio enhancement | a local FFmpeg denoise and loudness chain |
+| `ELEVENLABS_API_KEY` | background music, sound effects | music is skipped, sound effects are synthesized |
+
+The original video is never modified. Cuts are word indices, never
+timestamps, so a cut can only land between two words. The edit is one
+HyperFrames composition (`comp/index.html`) that renders to MP4 with
+headless Chrome and FFmpeg, and opens in HyperFrames Studio if you want to
+keep going by hand.
+
 ## Files
 
 ```

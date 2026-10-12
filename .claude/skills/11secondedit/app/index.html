@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>11 Second Edit</title>
+    <link rel="stylesheet" href="/app/style.css" />
+    <script src="/vendor/player.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand"><span class="logo">11</span> Second Edit</div>
+      <div class="top-right">
+        <span id="project-label" class="muted"></span>
+        <button id="new-edit" class="ghost" hidden>New edit</button>
+      </div>
+    </header>
+
+    <!-- ============================================================ SETUP -->
+    <main id="view-setup" class="view setup" hidden>
+      <section class="card">
+        <div class="card-head"><span class="num">1</span><h2>Your video</h2></div>
+        <label class="drop" id="drop-main">
+          <input type="file" id="file-main" accept="video/*" hidden />
+          <div class="drop-inner" id="drop-main-empty">
+            <strong>Drop your talking-head footage</strong>
+            <span class="muted">or click to choose. MP4, MOV or WebM. The original is never modified.</span>
+          </div>
+          <div class="drop-done" id="drop-main-done" hidden>
+            <video id="main-preview" muted playsinline></video>
+            <div><strong id="main-name"></strong><span class="muted">Click or drop to replace</span></div>
+          </div>
+          <div class="bar" id="bar-main" hidden><i></i></div>
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><span class="num">2</span><h2>B-roll <span class="muted small">optional</span></h2></div>
+        <label class="drop small-drop" id="drop-broll">
+          <input type="file" id="file-broll" accept="video/*" multiple hidden />
+          <div class="drop-inner">
+            <strong>Add your own b-roll clips</strong>
+            <span class="muted">Claude watches them and cuts them in where they fit what you are saying.</span>
+          </div>
+          <div class="bar" id="bar-broll" hidden><i></i></div>
+        </label>
+        <ul class="broll-list" id="broll-list"></ul>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><span class="num">3</span><h2>Edit</h2></div>
+        <div class="row format-row">
+          <span>Output format</span>
+          <div class="seg-control" id="format">
+            <button data-format="9:16" class="on">9:16 Reel</button>
+            <button data-format="16:9">16:9</button>
+          </div>
+        </div>
+        <ul class="features" id="features"></ul>
+        <label class="notes">
+          <span>Notes for Claude <span class="muted small">optional</span></span>
+          <textarea id="notes" rows="2" placeholder="e.g. CTA: comment GUIDE for the free guide. Music: calm lo-fi."></textarea>
+        </label>
+        <button id="edit-btn" class="primary big" disabled>Edit Video</button>
+        <p class="error" id="setup-error" hidden></p>
+      </section>
+    </main>
+
+    <!-- ============================================================ PROGRESS -->
+    <main id="view-progress" class="view progress" hidden>
+      <section class="card">
+        <h2 id="progress-title">Claude is editing</h2>
+        <p class="muted" id="progress-sub">Each step runs in order. This page updates by itself.</p>
+        <ol class="checklist" id="checklist"></ol>
+        <p class="hint" id="waiting-hint" hidden>
+          Waiting for Claude to pick up the job. Make sure <code>/11secondedit</code> is still running in Claude Code.
+        </p>
+      </section>
+    </main>
+
+    <!-- ============================================================ EDITOR -->
+    <main id="view-editor" class="view editor" hidden>
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <strong id="edit-duration"></strong>
+          <span class="muted" id="edit-summary"></span>
+        </div>
+        <div class="toolbar-right">
+          <button id="studio-btn" class="ghost">Open in HyperFrames Studio</button>
+          <select id="quality" aria-label="Export quality">
+            <option value="standard">Standard</option>
+            <option value="high">High</option>
+            <option value="draft">Draft (fast)</option>
+          </select>
+          <button id="export-btn" class="primary">Export</button>
+        </div>
+      </div>
+      <div class="export-status" id="export-status" hidden>
+        <div class="bar"><i id="export-bar"></i></div>
+        <span id="export-text"></span>
+      </div>
+
+      <div class="editor-grid">
+        <div class="preview-col">
+          <div class="player-wrap" id="player-wrap"></div>
+        </div>
+        <aside class="transcript-col">
+          <div class="transcript-head">
+            <h3>Transcript</h3>
+            <div class="transcript-actions">
+              <button id="cut-btn" class="ghost small" disabled>Cut</button>
+              <button id="restore-btn" class="ghost small" disabled>Restore</button>
+            </div>
+          </div>
+          <p class="muted small">Select words and press Delete to cut them from the video. Select cut words and press Delete again to bring them back. Click a word to jump to it.</p>
+          <div class="transcript" id="transcript" tabindex="0"></div>
+        </aside>
+      </div>
+
+      <div class="timeline" id="timeline">
+        <div class="tl-ruler" id="tl-ruler"></div>
+        <div class="tl-tracks" id="tl-tracks"></div>
+        <div class="tl-playhead" id="tl-playhead"></div>
+      </div>
+    </main>
+
+    <script type="module" src="/app/app.js"></script>
+  </body>
+</html>

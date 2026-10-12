@@ -1,0 +1,5 @@
+{
+  "always": ["um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "ahh", "hmm", "mm", "mhm"],
+  "context": ["like", "so", "basically", "actually", "literally", "right", "okay", "ok", "well", "just", "kinda", "sorta", "yeah", "anyway", "honestly"],
+  "phrases": [["you", "know"], ["i", "mean"], ["kind", "of"], ["sort", "of"], ["you", "know", "what", "i", "mean"]]
+}
