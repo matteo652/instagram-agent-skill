@@ -63,24 +63,65 @@ export async function compose(p) {
     tracks.video.push({ start: s.outStart, end: round(s.outStart + s.duration), label: `${n(s.srcStart)}s` });
   });
 
-  // ---- Zoom cuts: punch in on the camera wrapper, hard cut, no easing.
-  anim.push(`tl.set("#cam", { scale: 1, transformOrigin: "50% 40%" }, 0);`);
+  // ---- Camera: framing + zoom cuts on one wrapper holding the full frame.
+  // The wrapper is the whole source picture scaled to cover the output, and
+  // the output window slides across it. Framing defaults to edit.crop (the
+  // middle unless Claude set otherwise) and only moves for an explicit shot.
+  // Zooms push in on a point of the visible frame (the middle by default),
+  // never towards whoever happens to be talking.
+  const cover = Math.max(W / probe.width, H / probe.height);
+  const CW = round(probe.width * cover, 1);
+  const CH = round(probe.height * cover, 1);
+  const camHtml = { width: CW, height: CH };
+  const base = { x: edit.crop?.x ?? 0.5, y: edit.crop?.y ?? 0.5 };
+
+  const snapSpan = (from, to) => {
+    const span = spanForWords(tl, from, to ?? from);
+    if (!span) return null;
+    return { start: snapToCut(tl.cuts, span.start - 0.04), end: Math.min(snapToCut(tl.cuts, span.end + 0.05), videoEnd) };
+  };
+  const shots = (edit.framing?.shots || [])
+    .map((f) => ({ ...f, span: snapSpan(f.from, f.to) }))
+    .filter((f) => f.span)
+    .sort((a, b) => a.span.start - b.span.start);
   const zooms = edit.zooms
-    .map((z) => ({ ...z, span: spanForWords(tl, z.from, z.to ?? z.from) }))
+    .map((z) => ({ ...z, span: snapSpan(z.from, z.to) }))
     .filter((z) => z.span)
     .sort((a, b) => a.span.start - b.span.start);
   zooms.forEach((z, k) => {
-    const nextStart = zooms[k + 1]?.span.start ?? Infinity;
-    // Snap the zoom-in back to the cut it sits on, if one is close, so the
-    // change reads as a cut instead of a jump mid-sentence.
-    const start = snapToCut(tl.cuts, z.span.start - 0.04);
-    const end = Math.min(snapToCut(tl.cuts, z.span.end + 0.05), nextStart, videoEnd);
-    const scale = round(z.scale ?? 1.18);
-    const origin = `50% ${Math.round((z.originY ?? 0.4) * 100)}%`;
-    anim.push(`tl.set("#cam", { scale: ${scale}, transformOrigin: "${origin}" }, ${n(start)});`);
-    anim.push(`tl.set("#cam", { scale: 1 }, ${n(end)});`);
-    tracks.zooms.push({ start: round(start), end: round(end), label: `${scale}x` });
+    if (zooms[k + 1]) z.span.end = Math.min(z.span.end, zooms[k + 1].span.start);
   });
+
+  const at = (list, t) => list.find((x) => t >= x.span.start && t < x.span.end);
+  const camAt = (t) => {
+    const shot = at(shots, t);
+    const zoom = at(zooms, t);
+    const fx = shot?.x ?? base.x;
+    const fy = shot?.y ?? base.y;
+    const tx = round(-(CW - W) * fx, 1);
+    const ty = round(-(CH - H) * fy, 1);
+    const scale = round(zoom ? zoom.scale ?? 1.18 : 1);
+    // Zoom centre in the visible frame (0..1), converted into wrapper pixels
+    // so the push-in lands on that point however the frame is positioned.
+    const ox = round(W * (zoom?.originX ?? 0.5) - tx, 1);
+    const oy = round(H * (zoom?.originY ?? 0.5) - ty, 1);
+    return { tx, ty, scale, ox, oy };
+  };
+  const times = new Set([0]);
+  for (const x of [...shots, ...zooms]) {
+    times.add(x.span.start);
+    times.add(x.span.end);
+  }
+  let prev = null;
+  for (const t of [...times].filter((t) => t < videoEnd).sort((a, b) => a - b)) {
+    const c = camAt(t);
+    const key = JSON.stringify(c);
+    if (key === prev) continue;
+    prev = key;
+    anim.push(`tl.set("#cam", { x: ${c.tx}, y: ${c.ty}, scale: ${c.scale}, transformOrigin: "${c.ox}px ${c.oy}px" }, ${n(t)});`);
+  }
+  zooms.forEach((z) => tracks.zooms.push({ start: round(z.span.start), end: round(z.span.end), label: `${round(z.scale ?? 1.18)}x` }));
+  shots.forEach((f) => tracks.zooms.push({ start: round(f.span.start), end: round(f.span.end), label: `frame ${Math.round((f.x ?? base.x) * 100)}%` }));
 
   // ---- B-roll: full-frame cutaways over the A-roll, voice keeps playing.
   const brollMeta = Object.fromEntries((probe.broll || []).map((b) => [b.id, b]));
@@ -163,7 +204,7 @@ export async function compose(p) {
     tracks.audio.push({ start: at, end: round(at + len), label: fx.kind });
   }
 
-  writeComposition(p, { W, H, portrait, total, videoEnd, html, anim, captions: edit.captions });
+  writeComposition(p, { W, H, portrait, total, videoEnd, html, anim, captions: edit.captions, cam: camHtml });
 
   const timeline = {
     builtAt: new Date().toISOString(),
@@ -205,7 +246,7 @@ function resolveSfxTime(fx, { tl, tracks, videoEnd }) {
   return Math.max(0, round(t - lead));
 }
 
-function writeComposition(p, { W, H, portrait, total, html, anim, captions }) {
+function writeComposition(p, { W, H, portrait, total, html, anim, captions, cam }) {
   fs.mkdirSync(p.compDir, { recursive: true });
   fs.copyFileSync(require.resolve("gsap/dist/gsap.min.js"), path.join(p.compDir, "gsap.min.js"));
   const unit = Math.min(W, H) / 1080; // 1 at 1080 wide portrait or 1080 tall landscape
@@ -223,10 +264,12 @@ function writeComposition(p, { W, H, portrait, total, html, anim, captions }) {
       html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: #000; }
       body { font-family: "Montserrat", "Inter", "Helvetica Neue", Arial, sans-serif; }
       #root { position: relative; width: ${W}px; height: ${H}px; overflow: hidden; background: #000; }
-      #cam { position: absolute; inset: 0; overflow: hidden; z-index: 1; will-change: transform; }
-      .seg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      #cam { position: absolute; left: 0; top: 0; width: ${cam.width}px; height: ${cam.height}px; z-index: 1; will-change: transform; }
+      .seg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
       .broll { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
-      .cap { position: absolute; left: 0; right: 0; bottom: ${Math.round(H * capBottom)}px; z-index: 4;
+      .cap { position: absolute; left: 0; right: 0; ${captions?.y !== undefined
+        ? `top: ${Math.round(H * captions.y)}px; transform: translateY(-50%);`
+        : `bottom: ${Math.round(H * capBottom)}px;`} z-index: 4;
              display: flex; justify-content: center; padding: 0 ${px(70)}; }
       .cap-line { display: block; text-align: center; font-weight: 900; font-size: ${px(portrait ? 84 : 70)}; line-height: 1.12;
                   text-transform: ${captions?.uppercase === false ? "none" : "uppercase"}; color: #fff; letter-spacing: 0.01em;

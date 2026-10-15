@@ -17,7 +17,6 @@ export async function setup(p) {
     broll.push({ id: b.id, name: b.name, duration: round(info.duration), width: info.width, height: info.height });
   }
   probe.broll = broll;
-  writeJSON(p.probe, probe);
 
   await run("ffmpeg", ["-y", "-v", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", p.voice16k]);
   await run("ffmpeg", ["-y", "-v", "error", "-i", src, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", p.voice48k]);
@@ -25,6 +24,17 @@ export async function setup(p) {
   // Stills Claude can look at: framing of the speaker, and each b-roll clip.
   const at = Math.min(probe.duration / 2, 5);
   await run("ffmpeg", ["-y", "-v", "error", "-ss", String(at), "-i", src, "-frames:v", "1", "-vf", "scale=-2:720", path.join(p.reviewDir, "frame.jpg")]);
+  // Eight frames across the whole recording, so framing decisions are made
+  // on what is actually in shot over time, not on one still.
+  const every = probe.duration / 8;
+  probe.reviewFrames = Array.from({ length: 8 }, (_, k) => round(every * (k + 0.5), 1));
+  const tmp = path.join(p.reviewDir, "frames-tmp");
+  fs.mkdirSync(tmp, { recursive: true });
+  for (const [k, t] of probe.reviewFrames.entries()) {
+    await run("ffmpeg", ["-y", "-v", "error", "-ss", String(t), "-i", src, "-frames:v", "1", "-vf", "scale=480:-2", path.join(tmp, `${k}.jpg`)]);
+  }
+  await run("ffmpeg", ["-y", "-v", "error", "-i", path.join(tmp, "%d.jpg"), "-vf", "tile=4x2:padding=6", "-frames:v", "1", path.join(p.reviewDir, "frames.jpg")]);
+  fs.rmSync(tmp, { recursive: true, force: true });
   for (const b of brollSources(p)) {
     const info = broll.find((x) => x.id === b.id);
     const step = Math.max(info.duration / 4, 0.1);
@@ -34,6 +44,7 @@ export async function setup(p) {
       "-frames:v", "1", path.join(p.reviewDir, `broll-${b.id}.jpg`),
     ]);
   }
+  writeJSON(p.probe, probe);
   return probe;
 }
 
@@ -216,14 +227,20 @@ function fillFilter(width, height, crop) {
   );
 }
 
-// Writes comp/media/main.mp4: the original, cropped to the output format,
-// colour-graded, with the enhanced voice muxed in. The original file is only
-// ever read.
+// Writes comp/media/main.mp4: the whole original frame (never pre-cropped),
+// colour-graded, with the enhanced voice muxed in. Framing happens in the
+// composition, so the shot can sit on a different part of the frame at
+// different moments. The original file is only ever read.
 export async function prepareMain(p, edit, log = () => {}) {
   const { width, height } = FORMATS[edit.format];
   const src = originalVideo(p);
   const probe = readJSON(p.probe);
-  const vf = [fillFilter(width, height, edit.crop), edit.color?.filter, "fps=30", "format=yuv420p"].filter(Boolean).join(",");
+  // Never wider than needed to fill the output frame, never upscaled.
+  const cover = Math.max(width / probe.width, height / probe.height);
+  const k = Math.min(1, cover);
+  const ew = Math.round((probe.width * k) / 2) * 2;
+  const eh = Math.round((probe.height * k) / 2) * 2;
+  const vf = [`scale=${ew}:${eh},setsar=1`, edit.color?.filter, "fps=30", "format=yuv420p"].filter(Boolean).join(",");
   const useEnhanced = edit.audio?.source === "enhanced" && fs.existsSync(p.enhanced);
   const args = ["-y", "-v", "error", "-stats", "-i", src];
   if (useEnhanced) args.push("-i", p.enhanced, "-map", "0:v:0", "-map", "1:a:0");

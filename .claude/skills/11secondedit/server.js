@@ -231,6 +231,7 @@ async function handle(req, res) {
     const job = {
       submittedAt: new Date().toISOString(),
       format: b.format === "16:9" ? "16:9" : "9:16",
+      framing: b.framing === "auto" ? "auto" : "middle",
       features,
       notes: String(b.notes || "").slice(0, 2000),
       originalName: readJSON(path.join(p.dir, "upload.json"), {}).originalName,

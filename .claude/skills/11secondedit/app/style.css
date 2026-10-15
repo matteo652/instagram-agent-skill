@@ -67,7 +67,10 @@ select { background: var(--panel-2); border: 1px solid var(--line); border-radiu
 .broll-list button { padding: 2px 8px; background: transparent; color: var(--muted); }
 
 .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.format-row { padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.format-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.format-row:first-of-type { padding-top: 0; }
+.framing-hint { display: block; font-size: 12px; max-width: 34ch; }
+@media (max-width: 560px) { .format-row { flex-direction: column; align-items: flex-start; } }
 .seg-control { display: flex; background: var(--panel-2); border-radius: 10px; padding: 3px; }
 .seg-control button { background: transparent; padding: 6px 14px; border-radius: 8px; color: var(--muted); }
 .seg-control button.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }

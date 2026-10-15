@@ -119,10 +119,11 @@ export function defaultEdit(job) {
     format: job?.format === "16:9" ? "16:9" : "9:16",
     removed: {}, // word index -> reason ("badtake" | "filler" | "manual")
     silences: { enabled: false, maxGap: 0.35, pad: 0.08 },
-    crop: { x: 0.5, y: 0.5 },
+    crop: { x: 0.5, y: 0.5 }, // where the frame sits on the full picture, 0.5 = middle
+    framing: { mode: job?.framing === "auto" ? "auto" : "middle", shots: [] }, // shots: { from, to, x, y }
     color: null, // { filter, stats }
     audio: { source: "original" }, // or "enhanced"
-    zooms: [], // { from, to, scale, originY }
+    zooms: [], // { from, to, scale, originX, originY } origin = point of the frame it pushes in on
     broll: [], // { clip, from, to, mediaStart }
     hook: null, // { text, duration }
     cta: null, // { text, subtext, duration }

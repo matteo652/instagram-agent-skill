@@ -33,6 +33,11 @@ const DEFAULT_OFF = new Set();
 let S = null; // latest server state
 let features = {};
 let format = "9:16";
+let framing = "middle";
+const FRAMING_HINTS = {
+  middle: "The frame stays on the middle of your shot and pushes in on it. It never swings to whoever is talking.",
+  auto: "Claude looks at your footage and decides where the frame sits, moment by moment.",
+};
 let view = null;
 
 // ------------------------------------------------------------------ server
@@ -449,10 +454,18 @@ $("#format").addEventListener("click", (e) => {
   for (const x of $("#format").children) x.classList.toggle("on", x === b);
 });
 
+$("#framing").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  framing = b.dataset.framing;
+  for (const x of $("#framing").children) x.classList.toggle("on", x === b);
+  $("#framing-hint").textContent = FRAMING_HINTS[framing];
+});
+
 $("#edit-btn").addEventListener("click", async () => {
   $("#edit-btn").disabled = true;
   try {
-    apply(await api("/api/edit", { method: "POST", body: JSON.stringify({ features, format, notes: $("#notes").value }) }));
+    apply(await api("/api/edit", { method: "POST", body: JSON.stringify({ features, format, framing, notes: $("#notes").value }) }));
   } catch (e) {
     $("#setup-error").textContent = e.message;
     $("#setup-error").hidden = false;

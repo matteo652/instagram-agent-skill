@@ -29,7 +29,7 @@ const COMMANDS = {
   transcribe: [cmdTranscribe, "Transcribe with WhisperX. transcribe --import <whisperx.json> to reuse one."],
   transcript: [cmdTranscript, "Print the transcript with word indices, pauses and current cuts."],
   fillers: [cmdFillers, "List filler-word candidates with context. You decide which are fillers."],
-  apply: [cmdApply, "apply <cuts|zooms|broll|hook|cta|sfx|crop|captions|uncut> '<json>'|file.json  Validate and save a decision."],
+  apply: [cmdApply, "apply <cuts|zooms|framing|broll|hook|cta|sfx|captions|uncut> '<json>'|file.json  Validate and save a decision."],
   silences: [cmdSilences, "silences [maxGap=0.35] [pad=0.08]  Tighten every pause longer than maxGap."],
   color: [cmdColor, "Measure the footage and set an automatic colour grade."],
   prepare: [cmdPrepare, "Encode the cropped, graded A-roll with the enhanced voice, and the b-roll."],
@@ -156,7 +156,8 @@ async function cmdSetup() {
   step("setup", "done", `${fmt(probe.duration)} ${shape} ${probe.width}x${probe.height}, ${probe.broll.length} b-roll clip(s)`);
   out(`Footage: ${probe.width}x${probe.height} ${shape}, ${round(probe.duration, 1)}s, ${round(probe.fps, 2)} fps`);
   out(`Output:  ${edit.format} (${FORMATS[edit.format].width}x${FORMATS[edit.format].height})`);
-  out(`Frame:   ${path.join(p.reviewDir, "frame.jpg")}  (look at it to set crop if the speaker is off-centre)`);
+  out(`Framing: ${job.framing === "auto" ? "Claude chooses" : "keep the middle of the shot (never follow the speaker)"}`);
+  out(`Frames:  ${path.join(p.reviewDir, "frames.jpg")}  (8 frames, left to right then down, at ${probe.reviewFrames.map((t) => `${t}s`).join(", ")})`);
   for (const b of probe.broll) out(`B-roll:  ${b.id}  ${b.duration}s  ${path.join(p.reviewDir, `broll-${b.id}.jpg`)}`);
   if (job.notes) out(`\nNotes from the user: ${job.notes}`);
 }
@@ -276,11 +277,34 @@ async function cmdApply([kind, raw]) {
         checkIndex(z.from, "zoom.from");
         checkIndex(z.to ?? z.from, "zoom.to");
         if (z.scale !== undefined && (z.scale < 1 || z.scale > 1.6)) throw new Error("zoom.scale must be 1.0-1.6");
+        for (const k of ["originX", "originY"]) if (z[k] !== undefined && (z[k] < 0 || z[k] > 1)) throw new Error(`zoom.${k} must be 0-1`);
       }
-      edit.zooms = list.map((z) => ({ from: z.from, to: z.to ?? z.from, scale: z.scale ?? 1.18, originY: z.originY ?? 0.4 }));
+      edit.zooms = list.map((z) => ({
+        from: z.from, to: z.to ?? z.from, scale: z.scale ?? 1.18,
+        originX: z.originX ?? 0.5, originY: z.originY ?? 0.5, ...(z.why ? { why: z.why } : {}),
+      }));
       saveEdit(p, edit);
       step("zooms", "done", `${list.length} punch-ins`);
       out(`${list.length} zooms saved.`);
+      break;
+    }
+    case "framing": {
+      // Where the output window sits on the full frame. x/y 0..1: 0 = left/top
+      // edge, 0.5 = the middle. shots move it for a word range only.
+      const unit = (v, label) => {
+        if (v === undefined) return undefined;
+        if (typeof v !== "number" || v < 0 || v > 1) throw new Error(`${label} must be 0-1`);
+        return v;
+      };
+      const shots = (data.shots || []).map((f) => {
+        checkIndex(f.from, "shot.from");
+        checkIndex(f.to ?? f.from, "shot.to");
+        return { from: f.from, to: f.to ?? f.from, x: unit(f.x, "shot.x") ?? 0.5, y: unit(f.y, "shot.y") ?? 0.5, ...(f.why ? { why: f.why } : {}) };
+      });
+      edit.crop = { x: unit(data.x, "x") ?? edit.crop?.x ?? 0.5, y: unit(data.y, "y") ?? edit.crop?.y ?? 0.5 };
+      edit.framing = { ...(edit.framing || {}), shots };
+      saveEdit(p, edit);
+      out(`Frame sits at x=${edit.crop.x} y=${edit.crop.y}${shots.length ? `, ${shots.length} reframed moment(s)` : ""}.`);
       break;
     }
     case "broll": {
@@ -330,10 +354,13 @@ async function cmdApply([kind, raw]) {
     case "crop": {
       edit.crop = { x: Math.min(1, Math.max(0, data.x ?? 0.5)), y: Math.min(1, Math.max(0, data.y ?? 0.5)) };
       saveEdit(p, edit);
-      out(`Crop anchor set to x=${edit.crop.x} y=${edit.crop.y}.`);
+      out(`Frame sits at x=${edit.crop.x} y=${edit.crop.y}.`);
       break;
     }
     case "captions": {
+      if (data.y !== undefined && (typeof data.y !== "number" || data.y < 0.1 || data.y > 0.9)) {
+        throw new Error("captions.y is the caption line's height in the frame, 0.1 (top) to 0.9 (bottom)");
+      }
       edit.captions = { ...(edit.captions || {}), ...data };
       saveEdit(p, edit);
       out("Caption style saved.");

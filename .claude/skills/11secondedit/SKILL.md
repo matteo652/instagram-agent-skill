@@ -88,13 +88,34 @@ shows those as Off; do not run them.
 ED setup
 ```
 
-Probes the footage, extracts audio, writes `review/frame.jpg` and one contact
-sheet per b-roll clip (`review/broll-<id>.jpg`). Look at `frame.jpg` with the
-Read tool. If the output is 9:16 from landscape footage and the speaker is
-not centred, set the crop anchor (0 = left/top, 1 = right/bottom):
+Probes the footage, extracts audio, and writes `review/frames.jpg` (eight
+frames from across the recording, times printed by `setup`) plus one contact
+sheet per b-roll clip (`review/broll-<id>.jpg`). Look at `frames.jpg` with
+the Read tool before any framing or zoom decision, and note where the
+subject of the video sits: the food, the product, whatever is on the table.
+
+### framing (always)
+
+The output window slides over the full picture. `x`/`y` run 0 to 1: 0 is
+the left/top edge, 0.5 the middle, 1 the right/bottom.
+
+**The job says `framing: "middle"` (the default): keep the middle.** The
+frame stays on the middle of the shot for the whole edit. Never move it to a
+person because they are talking; the voice already tells the viewer who is
+speaking, and the thing between them (usually the food) is what the video
+is about. Leave the frame at 0.5, or, if `frames.jpg` shows the subject
+sitting a little off-centre, put it on the subject:
 
 ```bash
-ED apply crop '{"x":0.35,"y":0.5}'
+ED apply framing '{"x":0.5,"y":0.5}'
+```
+
+**Only with `framing: "auto"`** may you reframe per moment, and even then
+prefer the middle. Move off it only when the words are about something
+visibly elsewhere in the frame, and come back after:
+
+```bash
+ED apply framing '{"x":0.5,"y":0.5,"shots":[{"from":40,"to":52,"x":0.2,"why":"the knife on the left gets picked up"}]}'
 ```
 
 ### enhance (if on)
@@ -181,32 +202,40 @@ gentle grade. Nothing to decide.
 ED prepare
 ```
 
-Encodes the A-roll once: cropped to the output format, graded, with the
-enhanced voice. Rerun it only if you change crop, colour or audio later.
+Encodes the A-roll once: the full frame (framing is applied later, in the
+composition), graded, with the enhanced voice. Rerun it only if you change
+colour or audio later. Framing changes need only `ED compose`.
 
 ### zooms (if on)
 
-Read the transcript again (`ED transcript`, cuts now shown). Pick the lines
-that carry the point: the claim, the number, the turn, the punchline. Put a
-punch-in on each, roughly one every 4 to 8 seconds of finished edit, never
-two in a row, never on the first line (the hook already does that job).
-Ranges are word indices; the script snaps the zoom to the nearest cut so it
-reads as a jump cut.
+Read the transcript again (`ED transcript`, cuts now shown) next to
+`frames.jpg`. Zooms are how the edit shows what is being talked about, so
+put them **at the moments the words are about the subject in the middle**:
+the dish being named, an ingredient, a reaction to the taste, the reveal,
+the number that matters. Push in on the subject, not on a face.
+
+Roughly one every 4 to 8 seconds of finished edit, never two in a row, never
+on the first line (the hook already does that job). Ranges are word
+indices; the script snaps each zoom to the nearest cut so it reads as a jump
+cut.
 
 ```bash
-ED apply zooms '{"zooms":[{"from":16,"to":21,"scale":1.2},{"from":30,"to":36,"scale":1.15}]}'
+ED apply zooms '{"zooms":[{"from":16,"to":21,"scale":1.25,"why":"names the dish"},{"from":30,"to":36,"scale":1.2,"originY":0.6,"why":"first bite"}]}'
 ```
 
-`scale` 1.1 to 1.3. `originY` (default 0.4) moves the zoom centre up or
-down; set it to the speaker's eye line from `frame.jpg` if their face is
-high or low in the frame.
+`scale` 1.1 to 1.35. `originX`/`originY` (default 0.5, 0.5) are the point of
+the visible frame the zoom pushes in on. Leave them on the middle unless
+`frames.jpg` shows the subject sits higher or lower (a plate low on the
+table: `"originY":0.65`). Never aim a zoom at a person who is speaking.
 
 ### broll (if on)
 
 Look at each `review/broll-<id>.jpg` contact sheet with the Read tool so you
 know what is in every clip. Place each clip over the words it illustrates,
 the literal noun or action being talked about. Never over the hook (first
-sentence) or the last line. Each placement 1.5 to 4 seconds of speech. A clip
+sentence) or the last line, and never over the moments you zoomed in on
+the subject: those are the shots the video is for. Each placement 1.5 to 4
+seconds of speech. A clip
 can be used once; if there is nothing it fits, leave it out. `mediaStart`
 picks where in the clip to start, in seconds.
 
@@ -242,7 +271,16 @@ ED apply cta '{"text":"Comment GUIDE","subtext":"I will DM you the free checklis
 ED captions
 ```
 
-Word-by-word, active word in yellow. Pass a hex colour to change the
+Word-by-word, active word in yellow. Captions sit low in the frame by
+default. **Never let them cover the subject.** If `frames.jpg` (and your
+zooms) put the food or product in the lower part of the frame, move the
+captions above it, below the hook:
+
+```bash
+ED apply captions '{"y":0.36}'
+```
+
+`y` is the height of the caption line, 0.1 (top) to 0.9 (bottom). Pass a hex colour to change the
 highlight (`ED captions "#7CFFB2"`), or
 `ED apply captions '{"uppercase":false}'` for sentence case.
 
@@ -296,8 +334,9 @@ Export. Do not render unless they ask; the Export button does it.
 If they ask for changes in chat, make them with the same commands and run
 `ED compose` again. The page reloads by itself. For example: a different hook
 (`ED apply hook`), restore a cut (`ED apply uncut '{"cuts":[{"from":8,"to":14}]}'`),
-remove zooms (`ED apply zooms '[]'`), switch format (edit `format` in
-`edit.json`, then `ED prepare`, re-apply b-roll, `ED compose`).
+remove zooms (`ED apply zooms '[]'`), move the frame (`ED apply framing`),
+switch format (edit `format` in `edit.json`, then `ED prepare`, re-apply
+b-roll, `ED compose`).
 
 `ED render [draft|standard|high]` renders from the terminal; the file lands
 in `work/<project>/export/`.
