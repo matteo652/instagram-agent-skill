@@ -13,7 +13,7 @@ import {
 } from "./lib/core.js";
 import { buildTimeline } from "./lib/timeline.js";
 import * as media from "./lib/media.js";
-import { compose } from "./lib/compose.js";
+import { composeOrPrepare } from "./lib/compose.js";
 import { render } from "./lib/render.js";
 
 const [, , cmd, ...args] = process.argv;
@@ -30,7 +30,7 @@ const COMMANDS = {
   transcript: [cmdTranscript, "Print the transcript with word indices, pauses and current cuts."],
   fillers: [cmdFillers, "List filler-word candidates with context. You decide which are fillers."],
   apply: [cmdApply, "apply <cuts|zooms|framing|broll|hook|cta|sfx|captions|uncut> '<json>'|file.json  Validate and save a decision."],
-  silences: [cmdSilences, "silences [maxGap=0.35] [pad=0.08]  Tighten every pause longer than maxGap."],
+  silences: [cmdSilences, "silences [maxGap=1.0] [pad=0.2]  Cut pauses longer than maxGap, leaving pad of air each side."],
   color: [cmdColor, "Measure the footage and set an automatic colour grade."],
   prepare: [cmdPrepare, "Encode the cropped, graded A-roll with the enhanced voice, and the b-roll."],
   captions: [cmdCaptions, "captions [highlightColor]  Turn on word-by-word captions."],
@@ -375,7 +375,10 @@ async function cmdSilences([maxGap, pad]) {
   step("silences", "running", "Tightening pauses");
   const edit = loadEdit(p);
   const before = timelineNow({ ...edit, silences: { ...edit.silences, enabled: false } }).duration;
-  edit.silences = { enabled: true, maxGap: Number(maxGap ?? 0.35), pad: Number(pad ?? 0.08) };
+  const gap = Number(maxGap ?? 1.0);
+  const air = Number(pad ?? 0.2);
+  if (!(gap >= 0.7) || !(air >= 0.15)) throw new Error("Go no tighter than silences 0.7 0.15: below that, speech sounds clipped and shots flash.");
+  edit.silences = { enabled: true, maxGap: gap, pad: air };
   saveEdit(p, edit);
   const after = timelineNow(edit).duration;
   step("silences", "done", `${round(before - after, 1)}s of dead air removed`);
@@ -439,7 +442,7 @@ async function cmdCompose() {
     step("compose", "running", "Encoding the A-roll");
     await media.prepareMain(p, edit, (m) => step("compose", "running", m));
   }
-  const tl = await compose(p);
+  const tl = await composeOrPrepare(p, (m) => step("compose", "running", m));
   step("compose", "done", `${round(tl.duration, 1)}s edit, ${tl.segments.length} segments`);
   out(`Composition: ${path.join(p.compDir, "index.html")}`);
   out(`Edit is ${round(tl.duration, 1)}s (source ${round(tl.sourceDuration, 1)}s). The editor is open in the browser.`);

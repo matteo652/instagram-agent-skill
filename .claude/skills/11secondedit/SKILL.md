@@ -184,8 +184,12 @@ ED apply cuts '{"kind":"filler","cuts":[{"from":1},{"from":22},{"from":40,"to":4
 ED silences
 ```
 
-Tightens every pause over 0.35s to a natural breath. For a calm, slower
-speaker use `ED silences 0.5 0.12`; for punchy Reels the default is right.
+Cuts every pause longer than 1 second, leaving 0.2s of air either side so it
+still sounds like a person talking. A cut that would leave a shot under 0.6s
+is skipped, because a shot that short flashes and looks like a glitch. For a
+punchier, faster speaker use `ED silences 0.7 0.15`; never go tighter than
+that. For a calm or conversational video (two people at a table), the
+default is right.
 
 ### color (if on)
 
@@ -196,15 +200,18 @@ ED color
 Measures exposure, contrast, saturation and white balance and sets a
 gentle grade. Nothing to decide.
 
-### prepare (always, after color and enhance, before zooms and b-roll)
+### prepare (always, after the cuts, color and enhance; before zooms and b-roll)
 
 ```bash
 ED prepare
 ```
 
-Encodes the A-roll once: the full frame (framing is applied later, in the
-composition), graded, with the enhanced voice. Rerun it only if you change
-colour or audio later. Framing changes need only `ED compose`.
+Encodes only the footage the edit uses (every kept stretch plus 2 seconds
+either side), full frame, graded, with the enhanced voice, every frame a
+keyframe so cuts land on the exact frame. Run it after the cut steps so it
+encodes as little as possible. Rerun it if you change colour or audio.
+Framing, zooms and further cuts need only `ED compose`; if a restored word
+falls outside the encoded footage, `compose` re-encodes by itself.
 
 ### zooms (if on)
 

@@ -7,13 +7,16 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { readJSON, writeJSON, FORMATS, SKILL_DIR, ffprobe, round } from "./core.js";
 import { buildTimeline, spanForWords, timeForWord } from "./timeline.js";
-import { brollMediaPath } from "./media.js";
+import { brollMediaPath, mainFileTime, prepareMain } from "./media.js";
 
 const require = createRequire(import.meta.url);
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const n = (x) => String(round(x, 3));
+// A time that must land on a frame: written a hair early, never late, so
+// rounding can't push a clip's first frame onto the next one.
+const fr = (x) => String(Math.floor(x * 10000 + 1e-6) / 10000);
 
 // Groups output words into short caption chunks: at most 3 words, 1.4s, and
 // never across a sentence end or a pause.
@@ -36,6 +39,19 @@ export function captionChunks(words) {
 
 const clean = (t) => t.replace(/^[^\p{L}\p{N}$£€#@]+|[^\p{L}\p{N}%?!]+$/gu, "");
 
+// Composes, re-encoding main.mp4 first when the edit now reaches footage
+// that was not encoded (a word restored far from every kept span).
+export async function composeOrPrepare(p, log = () => {}) {
+  try {
+    return await compose(p);
+  } catch (err) {
+    if (err.code !== "NEEDS_PREPARE") throw err;
+    log("Encoding the restored footage");
+    await prepareMain(p, readJSON(p.edit), log);
+    return compose(p);
+  }
+}
+
 export async function compose(p) {
   const edit = readJSON(p.edit);
   const transcript = readJSON(p.transcript);
@@ -47,17 +63,29 @@ export async function compose(p) {
 
   const videoEnd = tl.duration;
   const ctaDur = edit.cta ? round(edit.cta.duration ?? 2.5) : 0;
-  const total = round(videoEnd + ctaDur);
+  const total = videoEnd + ctaDur;
 
   const html = [];
   const anim = [];
   const tracks = { video: [], broll: [], zooms: [], text: [], captions: [], audio: [] };
 
   // ---- A-roll: one <video> per kept segment, all reading main.mp4.
+  // main.mp4 holds only the spans the edit used when it was encoded; find
+  // each segment in it. Start a quarter frame early: the renderer shows the
+  // first frame at or after the seek time, so this lands on the intended
+  // frame even after the start is rounded to the millisecond. (Measured: a
+  // quarter frame late shows the next frame at every cut.)
+  const fileStarts = tl.segments.map((s) => mainFileTime(p, s.srcStart, s.srcEnd));
+  if (fileStarts.some((t) => t === null)) {
+    const err = new Error("Part of this edit is outside the encoded footage. Run: ED prepare");
+    err.code = "NEEDS_PREPARE";
+    throw err;
+  }
   tl.segments.forEach((s, k) => {
+    const mediaStart = fileStarts[k] - 0.25 / 30;
     html.push(
       `<video id="seg-${k}" class="clip seg" src="media/main.mp4" playsinline data-has-audio="true" ` +
-        `data-start="${n(s.outStart)}" data-duration="${n(s.duration)}" data-media-start="${n(s.srcStart)}" ` +
+        `data-start="${fr(s.outStart)}" data-duration="${fr(s.duration)}" data-media-start="${fr(mediaStart)}" ` +
         `data-fade-in="0.012" data-fade-out="0.012" data-track-index="0"></video>`,
     );
     tracks.video.push({ start: s.outStart, end: round(s.outStart + s.duration), label: `${n(s.srcStart)}s` });
@@ -172,12 +200,12 @@ export async function compose(p) {
   // ---- Call-to-action end card.
   if (edit.cta) {
     html.push(
-      `<div id="cta" class="clip cta" data-start="${n(videoEnd)}" data-duration="${n(ctaDur)}" data-track-index="3">` +
+      `<div id="cta" class="clip cta" data-start="${fr(videoEnd)}" data-duration="${n(ctaDur)}" data-track-index="3">` +
         `<span class="cta-text">${esc(edit.cta.text)}</span>` +
         (edit.cta.subtext ? `<span class="cta-sub">${esc(edit.cta.subtext)}</span>` : "") +
         `</div>`,
     );
-    anim.push(`tl.fromTo("#cta", { opacity: 0 }, { opacity: 1, duration: 0.25 }, ${n(videoEnd)});`);
+    anim.push(`tl.fromTo("#cta", { opacity: 0 }, { opacity: 1, duration: 0.25 }, ${fr(videoEnd)});`);
     anim.push(`tl.fromTo("#cta .cta-text", { y: 60, scale: 0.9, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.45, ease: "back.out(1.8)" }, ${n(videoEnd + 0.1)});`);
     if (edit.cta.subtext) anim.push(`tl.fromTo("#cta .cta-sub", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, ${n(videoEnd + 0.35)});`);
     tracks.text.push({ start: videoEnd, end: total, label: `CTA: ${edit.cta.text}` });
@@ -186,7 +214,7 @@ export async function compose(p) {
   // ---- Music bed under everything.
   if (edit.music?.file && fs.existsSync(path.join(p.compDir, edit.music.file))) {
     html.push(
-      `<audio id="music" src="${esc(edit.music.file)}" data-start="0" data-duration="${n(total)}" ` +
+      `<audio id="music" src="${esc(edit.music.file)}" data-start="0" data-duration="${fr(total)}" ` +
         `data-volume="${n(edit.music.volume ?? 0.12)}" data-fade-in="0.6" data-fade-out="1.5" data-track-index="5"></audio>`,
     );
     tracks.audio.push({ start: 0, end: total, label: "Music" });
@@ -289,7 +317,7 @@ function writeComposition(p, { W, H, portrait, total, html, anim, captions, cam 
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="${n(total)}" data-width="${W}" data-height="${H}">
+    <div id="root" data-composition-id="main" data-start="0" data-duration="${fr(total)}" data-width="${W}" data-height="${H}">
       <div id="cam">
         ${html.filter((h) => h.includes('class="clip seg"')).join("\n        ")}
       </div>

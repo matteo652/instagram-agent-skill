@@ -12,7 +12,7 @@ import {
   SKILL_DIR, WORK_DIR, CURRENT_FILE, readJSON, writeJSON, projectPaths, setCurrentProject, initialStatus,
   FEATURES, defaultEdit, loadEdit, saveEdit, brollSources, run,
 } from "./lib/core.js";
-import { compose } from "./lib/compose.js";
+import { composeOrPrepare } from "./lib/compose.js";
 import { render } from "./lib/render.js";
 
 const argv = process.argv.slice(2);
@@ -256,7 +256,7 @@ async function handle(req, res) {
         else if (!edit.removed[i]) edit.removed[i] = "manual";
       }
       saveEdit(p, edit);
-      return compose(p);
+      return composeOrPrepare(p);
     };
     composing = composing.then(run, run);
     try {

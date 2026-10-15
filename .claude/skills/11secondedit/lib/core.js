@@ -118,7 +118,7 @@ export function defaultEdit(job) {
     version: 1,
     format: job?.format === "16:9" ? "16:9" : "9:16",
     removed: {}, // word index -> reason ("badtake" | "filler" | "manual")
-    silences: { enabled: false, maxGap: 0.35, pad: 0.08 },
+    silences: { enabled: false, maxGap: 1.0, pad: 0.2 },
     crop: { x: 0.5, y: 0.5 }, // where the frame sits on the full picture, 0.5 = middle
     framing: { mode: job?.framing === "auto" ? "auto" : "middle", shots: [] }, // shots: { from, to, x, y }
     color: null, // { filter, stats }

@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { run, ffprobe, writeJSON, readJSON, originalVideo, brollSources, FORMATS, clamp, round } from "./core.js";
+import { buildTimeline } from "./timeline.js";
 
 // ---------------------------------------------------------------- setup
 
@@ -212,7 +213,9 @@ export async function analyzeColor(p) {
   const rm = round(clamp(-vCast / 128, -0.1, 0.1));
   const filter =
     `eq=brightness=${brightness}:contrast=${contrast}:saturation=${saturation}` +
-    (Math.abs(bm) > 0.005 || Math.abs(rm) > 0.005 ? `,colorbalance=rm=${rm}:bm=${bm}` : "");
+    // Per-channel gain, not colorbalance: colorbalance blows out highlights
+    // on FFmpeg 4.x.
+    (Math.abs(bm) > 0.005 || Math.abs(rm) > 0.005 ? `,colorchannelmixer=rr=${round(1 + rm)}:bb=${round(1 + bm)}` : "");
   return { filter, stats, params: { brightness, contrast, saturation, rm, bm } };
 }
 
@@ -227,10 +230,34 @@ function fillFilter(width, height, crop) {
   );
 }
 
-// Writes comp/media/main.mp4: the whole original frame (never pre-cropped),
-// colour-graded, with the enhanced voice muxed in. Framing happens in the
-// composition, so the shot can sit on a different part of the frame at
-// different moments. The original file is only ever read.
+export const MAIN_MAP = "main.map.json";
+const MARGIN = 2; // seconds of footage kept either side of each kept span
+const FPS = 30;
+
+// The spans of the original prepare encodes: every kept segment plus MARGIN
+// either side, merged, on the frame grid. Restoring a word inside the margin
+// needs no re-encode.
+export function encodeSpans(p, edit, probe) {
+  const frame = (t) => Math.round(t * FPS) / FPS;
+  if (!fs.existsSync(p.transcript)) return [{ srcStart: 0, srcEnd: frame(probe.duration) }];
+  const words = readJSON(p.transcript).words;
+  const tl = buildTimeline(words, edit.removed, { duration: probe.duration, silences: edit.silences });
+  const spans = [];
+  for (const s of tl.segments) {
+    const a = frame(Math.max(0, s.srcStart - MARGIN));
+    const b = frame(Math.min(probe.duration, s.srcEnd + MARGIN));
+    const last = spans[spans.length - 1];
+    if (last && a <= last.srcEnd) last.srcEnd = Math.max(last.srcEnd, b);
+    else spans.push({ srcStart: a, srcEnd: b });
+  }
+  return spans.length ? spans : [{ srcStart: 0, srcEnd: frame(probe.duration) }];
+}
+
+// Writes comp/media/main.mp4: only the spans the edit uses (see encodeSpans),
+// at full frame (never pre-cropped; framing happens in the composition),
+// colour-graded, with the enhanced voice, every frame a keyframe so a jump
+// to a cut never shows a stale frame. main.map.json maps original times to
+// times in this file. The original file is only ever read.
 export async function prepareMain(p, edit, log = () => {}) {
   const { width, height } = FORMATS[edit.format];
   const src = originalVideo(p);
@@ -240,20 +267,47 @@ export async function prepareMain(p, edit, log = () => {}) {
   const k = Math.min(1, cover);
   const ew = Math.round((probe.width * k) / 2) * 2;
   const eh = Math.round((probe.height * k) / 2) * 2;
-  const vf = [`scale=${ew}:${eh},setsar=1`, edit.color?.filter, "fps=30", "format=yuv420p"].filter(Boolean).join(",");
+
+  const spans = encodeSpans(p, edit, probe);
+  const half = 0.5 / FPS;
+  // Frame k sits at t = k/FPS. Bound each span half a frame either side of
+  // its first and last frame so float rounding can never drop or add one.
+  const vsel = spans.map((s) => `between(t,${(s.srcStart - half).toFixed(5)},${(s.srcEnd - half).toFixed(5)})`).join("+");
+  const asel = spans.map((s) => `between(t,${s.srcStart.toFixed(4)},${s.srcEnd.toFixed(4)})`).join("+");
   const useEnhanced = edit.audio?.source === "enhanced" && fs.existsSync(p.enhanced);
+  const video = [`fps=${FPS}`, `scale=${ew}:${eh},setsar=1`, edit.color?.filter, `select='${vsel}'`, `setpts=N/(${FPS}*TB)`, "format=yuv420p"].filter(Boolean).join(",");
+  const audio = `aselect='${asel}',asetpts=N/SR/TB`;
+  const filter = `[0:v:0]${video}[v];[${useEnhanced ? 1 : 0}:a:0]${audio}[a]`;
+
   const args = ["-y", "-v", "error", "-stats", "-i", src];
-  if (useEnhanced) args.push("-i", p.enhanced, "-map", "0:v:0", "-map", "1:a:0");
-  else args.push("-map", "0:v:0", "-map", "0:a:0");
+  if (useEnhanced) args.push("-i", p.enhanced);
+  const out = path.join(p.compMedia, "main.mp4");
   args.push(
-    "-vf", vf,
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-g", "30", "-keyint_min", "30",
+    "-filter_complex", filter, "-map", "[v]", "-map", "[a]",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-g", "1", "-bf", "0",
     "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-    "-t", String(probe.duration),
-    "-movflags", "+faststart",
-    path.join(p.compMedia, "main.mp4"),
+    "-movflags", "+faststart", out,
   );
+  log(`Encoding ${spans.length} span(s), ${round(spans.reduce((t, s) => t + s.srcEnd - s.srcStart, 0), 1)}s of ${round(probe.duration, 1)}s`);
   await run("ffmpeg", args, { onLine: (l) => /time=/.test(l) && log(`Encoding ${l.match(/time=(\S+)/)?.[1] || ""}`) });
+
+  let t = 0;
+  const map = spans.map((s) => {
+    const m = { ...s, fileStart: round(t, 4) };
+    t += s.srcEnd - s.srcStart;
+    return m;
+  });
+  writeJSON(path.join(p.compMedia, MAIN_MAP), { fps: FPS, spans: map });
+  return map;
+}
+
+// Where original time range [a, b] lives inside main.mp4, or null when that
+// footage was not encoded (a restored word outside every margin).
+export function mainFileTime(p, a, b) {
+  const file = path.join(p.compMedia, MAIN_MAP);
+  if (!fs.existsSync(file)) return a; // older full-length encode
+  const span = readJSON(file).spans.find((s) => a >= s.srcStart - 1e-3 && b <= s.srcEnd + 1e-3);
+  return span ? span.fileStart + (a - span.srcStart) : null;
 }
 
 // Relative to comp/media. The format is in the name so switching 9:16 <-> 16:9
@@ -272,7 +326,7 @@ export async function prepareBroll(p, edit) {
     await run("ffmpeg", [
       "-y", "-v", "error", "-i", b.file, "-an",
       "-vf", `${fillFilter(width, height)},fps=30,format=yuv420p`,
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-g", "30", "-movflags", "+faststart", out,
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-g", "1", "-bf", "0", "-movflags", "+faststart", out,
     ]);
   }
 }
